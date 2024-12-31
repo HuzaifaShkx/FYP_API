@@ -43,7 +43,7 @@ def bandpass_filter(data, lowcut=1.0, highcut=50.0, fs=128.0, order=5):
     return y
 
 # Read the EEG CSV file
-file_path = '2021-Arid-0194-Happy.csv'  # Replace with your file path
+file_path = "EEG's/2021-Arid-0194-Happy.csv"  # Replace with your file path
 data = pd.read_csv(file_path)
 
 # Define frequency bands
@@ -679,7 +679,7 @@ def getTimeSlots(patient_id):
     try:
         data = request.form.get('slots')
         cursor=conn.cursor()
-        cursor.execute("select times,dates from Appointment where times=? and dates=? and doctor_id=?",data['time'],data['date'],data['doctor_id'])
+        cursor.execute("select times,dates from Appointment where dates=? and doctor_id=?",data['date'],data['doctor_id'])
         slots=cursor.fetchall()
         slotslist=[]
         if slots:
