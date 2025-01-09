@@ -43,7 +43,7 @@ def bandpass_filter(data, lowcut=1.0, highcut=50.0, fs=128.0, order=5):
     return y
 
 # Read the EEG CSV file
-file_path = "EEG's/2021-Arid-0194-Happy.csv"  # Replace with your file path
+file_path = "../EEG_Related_Data/EEG's/2021-Arid-0194-Happy.csv"  # Replace with your file path
 data = pd.read_csv(file_path)
 
 # Define frequency bands
@@ -334,6 +334,10 @@ def add_supervisor():
         if result:
             
             cursor.execute('insert into Supervisor values(?)',user_dict['email'])
+            # Retrieve the last inserted ID
+            cursor.execute('SELECT id from Supervisor where UserId=?',user_dict['email'])
+            supervisor_id = cursor.fetchone()[0]
+            cursor.execute('insert into DoctorSupervisorRelationship values(?,?)',user_dict['doctor_id'],supervisor_id)
             conn.commit()
             cursor.close()
 
@@ -362,7 +366,27 @@ def login():
             return jsonify({"status":"Incorrect ID or Password"}),401
     except Exception as e:
         return jsonify({"Exception":str(e)}),500
+
+
+@app.route('/getSupervisorDoctor/<int:sup_id>')
+def getSupDoctor(sup_id):
+    try:
+        cursor=conn.cursor()
+        cursor.execute('select doctor_id from DoctorSupervisorRelationship where supervisor_id=?',(sup_id))
+        doctor_id=cursor.fetchone()
+        if doctor_id:
+            d_id={"doctor_id":doctor_id[0]}
+            cursor.close()
+
+            return jsonify(d_id),200
+        else:
+            cursor.close()
     
+            return jsonify({"status":"User with this id does not exist"}),405
+    except Exception as e:
+        return jsonify({"Exception":str(e)}),500
+    
+
 @app.route('/getAllPatient')
 def getAllPatient():
     try:
@@ -388,7 +412,7 @@ def getAllPatient():
             patientlist.append(patient)
         cursor.close()
     
-        return jsonify(patientlist)
+        return jsonify(patientlist),200
     except Exception as e:
         return jsonify({"Exception":str(e)}),500
 
@@ -414,7 +438,7 @@ def getAllDoctors():
             doctorlist.append(doctor)
         cursor.close()
     
-        return jsonify(doctorlist)
+        return jsonify(doctorlist),200
     except Exception as e:
         return jsonify({"Exception":str(e)}),500
 
