@@ -698,12 +698,13 @@ def getPatientPrescription(patient_id):
         return jsonify({"Exception":str(e)}),500
 
 
-@app.route('/getTimeSlots')
-def getTimeSlots(patient_id):
+@app.route('/getTimeSlots', methods=['POST'])
+def getTimeSlots():
     try:
-        data = request.form.get('slots')
+        dat = request.form.get('date')
+        did=request.form.get('doctor_id')
         cursor=conn.cursor()
-        cursor.execute("select times,dates from Appointment where dates=? and doctor_id=?",data['date'],data['doctor_id'])
+        cursor.execute("select times,dates from Appointment where dates=? and doctor_id=?",(dat,did))
         slots=cursor.fetchall()
         slotslist=[]
         if slots:
@@ -718,10 +719,11 @@ def getTimeSlots(patient_id):
             return jsonify(slotslist),200
         else:
             cursor.close()
-            return jsonify({"message":"Not Found"}),405
+            return jsonify({"message":"Not Found"}),404
 
     except Exception as e:
         cursor.close()
+        print(e)
         return jsonify({"Exception":str(e)}),500
 
 @app.route('/addAppointment',methods=['POST'])
