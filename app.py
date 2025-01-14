@@ -656,6 +656,30 @@ def getNewPatient(doctor_id):
             return jsonify({"message":"Not Found"}),405
     except Exception as e:
         return jsonify({"Exception":str(e)}),500
+    
+@app.route('/getNewPatientAppointmentDate/<int:doctor_id>/<int:patient_id>')
+def getNewPatientAppointmentDate(doctor_id, patient_id):
+    
+    try:
+        cursor=conn.cursor()
+        cursor.execute("SELECT a.dates,a.times FROM Patient p JOIN [User] u ON p.UserId = u.Id JOIN Appointment a ON p.Id = a.patient_id WHERE a.doctor_id = ? and a.patient_id=? and a.appStatus='false';",doctor_id,patient_id)
+        p=cursor.fetchall()[0]
+        if p:
+            patient = {
+                "time":p[1],
+                "date": p[0],
+                }
+               
+            cursor.close()
+        
+            return jsonify(patient),200
+        else:
+            cursor.close()
+        
+            return jsonify({"message":"Not Found"}),405
+    except Exception as e:
+        return jsonify({"Exception":str(e)}),500
+
 
 #add prescribtion to appointement
 @app.route('/prescribe',methods=['POST'])
