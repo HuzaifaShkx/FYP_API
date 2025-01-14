@@ -656,6 +656,40 @@ def getNewPatient(doctor_id):
             return jsonify({"message":"Not Found"}),405
     except Exception as e:
         return jsonify({"Exception":str(e)}),500
+from datetime import datetime
+@app.route('/getTodaysAppointments/<int:doctor_id>')
+def getTodaysAppointment(doctor_id):
+    patientlist=[]
+    current_datetime = datetime.now()
+
+# Get just the current date
+    current_date = current_datetime.strftime('%Y-%m-%d')
+    try:
+        cursor=conn.cursor()
+        cursor.execute("SELECT p.id,u.name,u.gender,u.dob,p.height,p.weight,p.contact,u.ImgPath FROM Patient p JOIN [User] u ON p.UserId = u.Id JOIN Appointment a ON p.Id = a.patient_id WHERE a.doctor_id = ? and a.appStatus='false' and a.dates = ?;",(doctor_id,current_date))
+        patient=cursor.fetchall()
+        if patient:
+            for i in patient:
+                patient = {
+                "id":i[0],
+                "name": i[1],
+                "gender": i[2],
+                "dob": i[3],
+                "height": i[4],
+                "weight": i[5],
+                "contact":i[6],
+                "imgpath":i[7]
+                }
+                patientlist.append(patient)
+            cursor.close()
+        
+            return jsonify(patientlist),200
+        else:
+            cursor.close()
+        
+            return jsonify({"message":"Not Found"}),405
+    except Exception as e:
+        return jsonify({"Exception":str(e)}),500
     
 @app.route('/getNewPatientAppointmentDate/<int:doctor_id>/<int:patient_id>')
 def getNewPatientAppointmentDate(doctor_id, patient_id):
