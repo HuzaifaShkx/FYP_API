@@ -1233,15 +1233,19 @@ def getExperiments(sessionid):
     try:
         cursor = conn.cursor()
         cursor.execute('select * from Experiment e where e.sessionid=?',(sessionid))
-        result = cursor.fetchall()[0]
-        ex={
-            'id':result[0],
-            'EEGPath':result[1],
-            'Result':result[2],
-            'SessionID':result[3]
-        }
+        result = cursor.fetchall()
+        experiments = []
+
+        for row in result:
+            ex = {
+                'id': row[0],
+                'EEGPath': row[1],
+                'Result': row[2],
+                'SessionID': row[3]
+            }
+            experiments.append(ex)
         cursor.close()
-        return jsonify(ex),200
+        return jsonify(experiments),200 
     except Exception as e:
         return jsonify({'status':"Experiments not found"}),500
 if __name__ == '__main__':
