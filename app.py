@@ -1215,6 +1215,35 @@ def addExperiment():
         conn.rollback()
         cursor.close()
         return jsonify({"Exception": str(e)}), 500
+
+@app.route("/GetSessions/<int:doctorid>/<int:patientid>", methods=['GET'])
+def getSession(doctorid, patientid):
+    try:
+        cursor = conn.cursor()
+        cursor.execute('select s.id from Appointment a join Session s on a.AppId=s.appointmentId where a.doctor_id=? and a.patient_id=?',(doctorid,patientid))
+        result = cursor.fetchall()
+        session_ids = [row[0] for row in result]
+        cursor.close()
+        return jsonify({"status": "Sessions found", "sessions": session_ids}),200
+    except Exception as e:
+        return jsonify({'status':"Sessions not found"}),500
+    
+@app.route("/GetExperiments/<int:sessionid>", methods=['GET'])
+def getExperiments(sessionid):
+    try:
+        cursor = conn.cursor()
+        cursor.execute('select * from Experiment e where e.sessionid=?',(sessionid))
+        result = cursor.fetchall()[0]
+        ex={
+            'id':result[0],
+            'EEGPath':result[1],
+            'Result':result[2],
+            'SessionID':result[3]
+        }
+        cursor.close()
+        return jsonify(ex),200
+    except Exception as e:
+        return jsonify({'status':"Experiments not found"}),500
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000,debug=True) 
 
