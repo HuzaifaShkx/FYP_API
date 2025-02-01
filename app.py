@@ -10,13 +10,19 @@ import json
 from datetime import datetime
 import pandas as pd
 from scipy.signal import butter, filtfilt
+import pandas as pd
+import numpy as np
+from scipy.signal import butter, filtfilt
+from tensorflow.keras.models import load_model
+
+
 app=Flask(__name__)
 
 UPLOAD_FOLDER_Images = 'FYPAPIs/Uploads/Images/'
 UPLOAD_FOLDER_EEG = 'FYPAPIs/Uploads/eeg/'
 UPLOAD_FOLDER_recorded = 'FYPAPIs/Uploads/RecordedVideos/'
 ALLOWED_EXTENSIONS_img = {'png', 'jpg', 'jpeg'}
-ALLOWED_EXTENSIONS_eeg = {'dat','edf','cnt'}
+ALLOWED_EXTENSIONS_eeg = {'dat','edf','cnt','csv'}
 ALLOWED_EXTENSIONS_video = {'avi','mp4'}
 UPLOAD_FOLDER_watchedVideo = 'FYPAPIs/Uploads/watchedvideos/'
 
@@ -78,98 +84,145 @@ for channel in channels:
         filtered_data[channel][band] = bandpass_filter(data[channel], lowcut, highcut, sampling_rate)
 
 
-# Preprocessing EEG signals
-def preprocess_eeg(eeg_data):
-    eeg_data = bandpass_filter(eeg_data)
-    eeg_data = (eeg_data - np.mean(eeg_data, axis=0, keepdims=True)) / np.std(eeg_data, axis=0, keepdims=True)
-    return eeg_data
+# # Preprocessing EEG signals
+# def preprocess_eeg(eeg_data):
+#     eeg_data = bandpass_filter(eeg_data)
+#     eeg_data = (eeg_data - np.mean(eeg_data, axis=0, keepdims=True)) / np.std(eeg_data, axis=0, keepdims=True)
+#     return eeg_data
 
-# Feature extraction - reshape for CNN input
-def prepare_data_for_cnn(eeg_data):
-    num_channels, num_timepoints = eeg_data.shape
-    eeg_data = eeg_data.reshape(1, 1, num_channels, num_timepoints)  # [batch_size, channels, height, width]
-    return eeg_data
+# # Feature extraction - reshape for CNN input
+# def prepare_data_for_cnn(eeg_data):
+#     num_channels, num_timepoints = eeg_data.shape
+#     eeg_data = eeg_data.reshape(1, 1, num_channels, num_timepoints)  # [batch_size, channels, height, width]
+#     return eeg_data
 
 
-# Map DEAP values to emotions based on predefined thresholds
-def map_to_emotion(valence, arousal, dominance, liking):
-    if valence > 5 and arousal > 5:
-        return 'Happy'
-    elif valence < 5 and arousal > 5:
-        return 'Angry'
-    elif valence < 5 and arousal < 5:
-        return 'Sad'
-    elif valence > 5 and arousal < 5:
-        return 'Surprise'
-    elif valence <= 5 and arousal <= 5:
-        return 'Neutral'
-    elif valence > 5 and arousal <= 5:
-        return 'Relaxed'
-    else:
-        return 'unknown'
+# # Map DEAP values to emotions based on predefined thresholds
+# def map_to_emotion(valence, arousal, dominance, liking):
+#     if valence > 5 and arousal > 5:
+#         return 'Happy'
+#     elif valence < 5 and arousal > 5:
+#         return 'Angry'
+#     elif valence < 5 and arousal < 5:
+#         return 'Sad'
+#     elif valence > 5 and arousal < 5:
+#         return 'Surprise'
+#     elif valence <= 5 and arousal <= 5:
+#         return 'Neutral'
+#     elif valence > 5 and arousal <= 5:
+#         return 'Relaxed'
+#     else:
+#         return 'unknown'
 
-class EEGNet(nn.Module):
-    def __init__(self, num_classes):
-        super(EEGNet, self).__init__()
+# class EEGNet(nn.Module):
+#     def __init__(self, num_classes):
+#         super(EEGNet, self).__init__()
 
-        self.block1 = nn.Sequential(
-            nn.Conv2d(1, 16, (1, 64), padding=(0, 32), bias=False),  # Same padding
-            nn.BatchNorm2d(16),
-            nn.Conv2d(16, 32, (32, 1), groups=16, bias=False),  # Depthwise convolution
-            nn.BatchNorm2d(32),
-            nn.ELU(),
-            nn.AvgPool2d((1, 4)),
-            nn.Dropout(0.5)
-        )
+#         self.block1 = nn.Sequential(
+#             nn.Conv2d(1, 16, (1, 64), padding=(0, 32), bias=False),  # Same padding
+#             nn.BatchNorm2d(16),
+#             nn.Conv2d(16, 32, (32, 1), groups=16, bias=False),  # Depthwise convolution
+#             nn.BatchNorm2d(32),
+#             nn.ELU(),
+#             nn.AvgPool2d((1, 4)),
+#             nn.Dropout(0.5)
+#         )
 
-        self.block2 = nn.Sequential(
-            nn.Conv2d(32, 16, (1, 16), bias=False),
-            nn.BatchNorm2d(16),
-            nn.ELU(),
-            nn.AvgPool2d((1, 8)),
-            nn.Dropout(0.5)
-        )
+#         self.block2 = nn.Sequential(
+#             nn.Conv2d(32, 16, (1, 16), bias=False),
+#             nn.BatchNorm2d(16),
+#             nn.ELU(),
+#             nn.AvgPool2d((1, 8)),
+#             nn.Dropout(0.5)
+#         )
 
-        # Automatically calculate the size of the flatten layer by passing dummy input
-        self.flatten_size = self._get_flatten_size()
-        self.fc = nn.Linear(self.flatten_size, num_classes)
+#         # Automatically calculate the size of the flatten layer by passing dummy input
+#         self.flatten_size = self._get_flatten_size()
+#         self.fc = nn.Linear(self.flatten_size, num_classes)
 
-    def _get_flatten_size(self):
-        with torch.no_grad():
-            x = torch.randn(1, 1, 32, 8064)  # Use the actual input shape here
-            x = self.block1(x)
-            x = self.block2(x)
-            flatten_size = x.view(1, -1).size(1)
-        return flatten_size
+#     def _get_flatten_size(self):
+#         with torch.no_grad():
+#             x = torch.randn(1, 1, 32, 8064)  # Use the actual input shape here
+#             x = self.block1(x)
+#             x = self.block2(x)
+#             flatten_size = x.view(1, -1).size(1)
+#         return flatten_size
 
-    def forward(self, x):
-        x = self.block1(x)
-        x = self.block2(x)
-        x = x.view(x.size(0), -1)  # Flatten
-        x = self.fc(x)
-        return x
+#     def forward(self, x):
+#         x = self.block1(x)
+#         x = self.block2(x)
+#         x = x.view(x.size(0), -1)  # Flatten
+#         x = self.fc(x)
+#         return x
 
-# Predict the emotion from a single trial using a trained model
-def predict_emotion(model, eeg_data, device):
-    # Preprocess the data
-    eeg_data = preprocess_eeg(eeg_data)
-    X = prepare_data_for_cnn(eeg_data)
+# # Predict the emotion from a single trial using a trained model
+# def predict_emotion(model, eeg_data, device):
+#     # Preprocess the data
+#     eeg_data = preprocess_eeg(eeg_data)
+#     X = prepare_data_for_cnn(eeg_data)
 
-    # Convert data to PyTorch tensor and move it to the specified device (CPU/GPU)
-    X = torch.tensor(X, dtype=torch.float32).to(device)  # No need for unsqueeze(0), already has batch dimension
+#     # Convert data to PyTorch tensor and move it to the specified device (CPU/GPU)
+#     X = torch.tensor(X, dtype=torch.float32).to(device)  # No need for unsqueeze(0), already has batch dimension
 
-    # Set the model to evaluation mode
-    model.eval()
+#     # Set the model to evaluation mode
+#     model.eval()
 
-    # Make prediction
-    with torch.no_grad():
-        predictions = model(X)
+#     # Make prediction
+#     with torch.no_grad():
+#         predictions = model(X)
     
-    predicted_emotion = torch.argmax(predictions, dim=1).item()
-    confidence_score = torch.max(predictions).item()
+#     predicted_emotion = torch.argmax(predictions, dim=1).item()
+#     confidence_score = torch.max(predictions).item()
 
-    return predicted_emotion, confidence_score
+#     return predicted_emotion, confidence_score
 
+# Band-pass filter function
+def bandpass_filter(data, lowcut, highcut, fs, order=4):
+    nyquist = 0.5 * fs
+    low = lowcut / nyquist
+    high = highcut / nyquist
+    b, a = butter(order, [low, high], btype='band')
+    return filtfilt(b, a, data, axis=0)
+
+# Prediction function
+def predict_eeg(model, csv_file, lowcut=1.0, highcut=50.0, sampling_rate=256, chunk_size=1536):
+    """
+    Predict the class for a full EEG CSV file using the trained model.
+
+    Parameters:
+    - model: Trained EEGNet model.
+    - csv_file: Path to the EEG CSV file.
+    - lowcut, highcut: Band-pass filter cutoff frequencies.
+    - sampling_rate: EEG sampling rate in Hz.
+    - chunk_size: Number of samples per chunk.
+
+    Returns:
+    - predictions: Array of predicted class probabilities for each chunk.
+    - predicted_classes: Array of predicted class labels for each chunk.
+    """
+    # Load the EEG data
+    data = pd.read_csv(csv_file)
+    columns_to_drop = ['timestamps']  # Drop unnecessary columns if present
+    data = data.drop(columns=columns_to_drop, errors='ignore')
+    eeg_array = data.to_numpy()
+
+    # Apply band-pass filter
+    eeg_filtered = bandpass_filter(eeg_array, lowcut, highcut, sampling_rate)
+
+    # Chunk the filtered data
+    num_chunks = len(eeg_filtered) // chunk_size
+    if num_chunks == 0:
+        raise ValueError("EEG data is too short for the specified chunk size.")
+
+    eeg_chunks = eeg_filtered[:num_chunks * chunk_size].reshape(num_chunks, chunk_size, eeg_array.shape[1])
+    eeg_chunks = np.transpose(eeg_chunks, (0, 2, 1))  # Shape: (num_chunks, channels, samples)
+    eeg_chunks = eeg_chunks[..., np.newaxis]  # Add extra dimension for model input: (num_chunks, channels, samples, 1)
+
+    # Predict using the model
+    predictions = model.predict(eeg_chunks)  # Shape: (num_chunks, num_classes)
+    predicted_classes = np.argmax(predictions, axis=1)  # Get the class labels (0, 1, 2)
+
+    return predictions, predicted_classes
 
 def allowed_file_img(filename):
     return '.' in filename and \
@@ -632,7 +685,7 @@ def getNewPatient(doctor_id):
     patientlist=[]
     try:
         cursor=conn.cursor()
-        cursor.execute("SELECT p.id,u.name,u.gender,u.dob,p.height,p.weight,p.contact,u.ImgPath FROM Patient p JOIN [User] u ON p.UserId = u.Id JOIN Appointment a ON p.Id = a.patient_id WHERE a.doctor_id = ? and a.appStatus='false';",doctor_id)
+        cursor.execute("SELECT p.id,u.name,u.gender,u.dob,p.height,p.weight,p.contact,u.ImgPath,a.AppId FROM Patient p JOIN [User] u ON p.UserId = u.Id JOIN Appointment a ON p.Id = a.patient_id WHERE a.doctor_id = ? and a.appStatus='false';",doctor_id)
         patient=cursor.fetchall()
         if patient:
             for i in patient:
@@ -644,7 +697,8 @@ def getNewPatient(doctor_id):
                 "height": i[4],
                 "weight": i[5],
                 "contact":i[6],
-                "imgpath":i[7]
+                "imgpath":i[7],
+                "appid":i[8]
                 }
                 patientlist.append(patient)
             cursor.close()
@@ -666,7 +720,7 @@ def getTodaysAppointment(doctor_id):
     current_date = current_datetime.strftime('%Y-%m-%d')
     try:
         cursor=conn.cursor()
-        cursor.execute("SELECT p.id,u.name,u.gender,u.dob,p.height,p.weight,p.contact,u.ImgPath FROM Patient p JOIN [User] u ON p.UserId = u.Id JOIN Appointment a ON p.Id = a.patient_id WHERE a.doctor_id = ? and a.appStatus='false' and a.dates = ?;",(doctor_id,current_date))
+        cursor.execute("SELECT p.id,u.name,u.gender,u.dob,p.height,p.weight,p.contact,u.ImgPath,a.AppId FROM Patient p JOIN [User] u ON p.UserId = u.Id JOIN Appointment a ON p.Id = a.patient_id WHERE a.doctor_id = ? and a.appStatus='false' and a.dates = ?;",(doctor_id,current_date))
         patient=cursor.fetchall()
         if patient:
             for i in patient:
@@ -678,7 +732,8 @@ def getTodaysAppointment(doctor_id):
                 "height": i[4],
                 "weight": i[5],
                 "contact":i[6],
-                "imgpath":i[7]
+                "imgpath":i[7],
+                "appid":i[8]
                 }
                 patientlist.append(patient)
             cursor.close()
@@ -803,10 +858,10 @@ def addAppointment():
 def addEEG():
     try:
         
-        file = request.files['file']
-        channel=request.form.get('channel')
+        file = request.files['eeg']
+        channel=4
         if not file:
-            return jsonify({"status":"No File selected"}),301
+            return jsonify({"status":"No File selected"}),404
         elif file and allowed_file_eeg(file.filename):    
             timestamp = datetime.now().strftime('%Y%m%d%H%M%S%f')
             filepath = os.path.join(UPLOAD_FOLDER_EEG, f"{timestamp}{file.filename}")
@@ -817,11 +872,11 @@ def addEEG():
         if row>=1:
             conn.commit()
             cursor.close()
-            return jsonify({"status":"EEG Uploaded"}),201
+            return jsonify({"status":"EEG Uploaded"}),200
         else:
             conn.rollback()
             cursor.close()
-            return jsonify({"status":"EEG Not Uploaded"}),405
+            return jsonify({"status":"EEG Not Uploaded"}),400
     except Exception as e:
         cursor.close()
         return jsonify({"Exception":str(e)}),500
@@ -882,26 +937,7 @@ def addWatchedVideo():
         cursor.close()
         return jsonify({"Exception":str(e)}),500
     
-@app.route('/addExperiment',methods=['POST'])
-def addExperiment():
-    try:
-        experiment = request.get_json()
-        cursor=conn.cursor()
-        cursor.execute('insert into Experiment(patientId,Supervisor_id,watchedVideo_id,eegRecorded_id,captureVideo_id,appointment_id) values (?,?,?,?,?,?)',experiment['patientid'],experiment['supervisorid'],experiment['watchedvideoid'],experiment['eegrecordedid'],experiment['capturevideoid'],experiment['appointmentid'])
-        row=cursor.rowcount
-        if row>=1:
-            conn.commit()
-            cursor.close()
-            return jsonify({"status":"Experiment added"})
-        else:
-            conn.rollback()
-            cursor.close()
-            return jsonify({"status":"Experiment Not added"})
-    except Exception as e:
-        conn.rollback()
-        cursor.close()
-        return jsonify({"Exception":str(e)}),500
-    
+
 @app.route('/emotionResult/<int:expeiment_id>')
 def get_emotionResult(expeiment_id):
     try:
@@ -1057,37 +1093,128 @@ def serve_image(filename):
     return send_file(full_path, mimetype='image/jpeg')
 
 
-@app.route('/predictEEGEmotion',methods=["POST"])
-def predictEEGEmotion():
+# @app.route('/predictEEGEmotion',methods=["POST"])
+# def predictEEGEmotion():
     
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    tn=int(request.form.get('trialNo'))
-    sbNo=int(request.form.get('subjectNo'))
-    file_path = fr'C:\Project Dataset\data_preprocessed_python\data_preprocessed_python\s{sbNo}.dat'
-    #trial_index = int(input("Enter trial no 1-40: "))  # Index of the trial you want to predict
-    trial_index = tn # Index of the trial you want to predict
-    # Load a single trial's EEG data
-    eeg_data, true_label = load_single_trial(file_path, trial_index)
-    model=EEGNet(num_classes=7)
-    # Load the pre-trained model (.pth)
-    state_dict = torch.load(r'D:/Trained-Models/eegnet_eeg_emotion_recognition6.pth')
-    model.load_state_dict(state_dict)
-    model = model.to(device)
+#     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+#     tn=int(request.form.get('trialNo'))
+#     sbNo=int(request.form.get('subjectNo'))
+#     file_path = fr'C:\Project Dataset\data_preprocessed_python\data_preprocessed_python\s{sbNo}.dat'
+#     #trial_index = int(input("Enter trial no 1-40: "))  # Index of the trial you want to predict
+#     trial_index = tn # Index of the trial you want to predict
+#     # Load a single trial's EEG data
+#     eeg_data, true_label = load_single_trial(file_path, trial_index)
+#     model=EEGNet(num_classes=7)
+#     # Load the pre-trained model (.pth)
+#     state_dict = torch.load(r'D:/Trained-Models/eegnet_eeg_emotion_recognition6.pth')
+#     model.load_state_dict(state_dict)
+#     model = model.to(device)
 
-    # Predict the emotion
-    predicted_emotion, score = predict_emotion(model, eeg_data, device)
+#     # Predict the emotion
+#     predicted_emotion, score = predict_emotion(model, eeg_data, device)
 
-    # Convert the prediction to the emotion label using the previously saved LabelBinarizer classes
-    le_classes = np.load(r'D:/Trained-Models/label_classes6.npy')
-    emotion_label = le_classes[predicted_emotion]
+#     # Convert the prediction to the emotion label using the previously saved LabelBinarizer classes
+#     le_classes = np.load(r'D:/Trained-Models/label_classes6.npy')
+#     emotion_label = le_classes[predicted_emotion]
 
-    print(f"Predicted Emotion: {emotion_label}")
-    print(f"True Label: {map_to_emotion(*true_label)}")
-    print(f"Predicted Score: {score}")
-    return jsonify({"predicted emotion":emotion_label, "score":score,"tn":tn})
+#     print(f"Predicted Emotion: {emotion_label}")
+#     print(f"True Label: {map_to_emotion(*true_label)}")
+#     print(f"Predicted Score: {score}")
+#     return jsonify({"predicted emotion":emotion_label, "score":score,"tn":tn})
 
+@app.route('/predictEEGEmotion/<string:filen>')
+def predictEEGEmotion(filen):
+    # Load the trained model
+    model_path = r"C:\FYP_Code\Serious_Work\E\Trained_Model/Model9_dropout-256.h5"  # Update with your model path
+    model = load_model(model_path)
 
+    # File path to the new EEG CSV file
+    eeg_file = f"C:/FYP_Code/FYPAPIs/Uploads/eeg/{filen}"  # Update with your EEG file path
 
+    # Map emotions to labels
+    label_map = {"Happy": 0, "Sad": 1, "Relax": 2, "Stress 1":3,"Stress 2":4,"Stress 3":5}  # Map "Relax" to Neutral
+
+    # Make predictions
+    try:
+        predictions, predicted_classes = predict_eeg(model, eeg_file)
+
+        # Map predicted classes to emotion labels
+        mapped_emotions = [list(label_map.keys())[list(label_map.values()).index(cls)] for cls in predicted_classes]
+
+        # Display the results
+        print("Predictions (class probabilities):")
+        print(predictions)
+        print("\nPredicted Classes:")
+        print(predicted_classes)
+        print("\nMapped Emotions:")
+        print(mapped_emotions)
+        return jsonify(mapped_emotions),200
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        return "An error occurred",500
+    
+@app.route("/AllEEGFilesName")
+def getEEGFileName():
+    # Path to the folder
+    folder_path = "FYPAPIs/Uploads/eeg"
+
+    # Get the list of file names
+    file_names = os.listdir(folder_path)
+    return file_names
+# @app.route("/recordStream")
+# def EEGRecord():
+#      # Note: an existing Muse LSL stream is required
+#     record(60,filename=f"C:/FYP_Code/FYPAPIs/Uploads/eeg/s1")
+
+#     # Note: Recording is synchronous, so code here will not execute until the stream has been closed
+#     print('Recording has ended')
+@app.route("/AddSession", methods=['POST'])
+def addSession():
+    try:
+        session = request.get_json()
+        cursor = conn.cursor()
+
+        # Use the correct primary key column name
+        cursor.execute(
+            'INSERT INTO Session(SupervisorId, AppointmentId) OUTPUT INSERTED.ID VALUES (?, ?)',
+            (session['supervisorid'], session['appointmentid'])
+        )
+
+        result = cursor.fetchone()
+        inserted_id = result[0] if result else None
+
+        conn.commit()
+        cursor.close()
+
+        return jsonify({"status": "Experiment added", "id": inserted_id})
+
+    except Exception as e:
+        conn.rollback()
+        cursor.close()
+        return jsonify({"Exception": str(e)}), 500
+    
+@app.route("/AddExperiment", methods=['POST'])
+def addExperiment():
+    try:
+        experiment = request.get_json()
+        cursor = conn.cursor()
+
+        # Use the correct primary key column name (e.g., "id" or actual column name)
+        cursor.execute(
+            'INSERT INTO Experiment (EEGPath, result, sessionid) OUTPUT INSERTED.id VALUES (?, ?, ?)',
+            (experiment['EEGPath'], experiment['result'], experiment['sessionid'])
+        )
+
+        inserted_id = cursor.fetchone()[0]  # Fetch the inserted ID
+        conn.commit()
+        cursor.close()
+
+        return jsonify({"status": "Experiment added", "id": inserted_id})
+
+    except Exception as e:
+        conn.rollback()
+        cursor.close()
+        return jsonify({"Exception": str(e)}), 500
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000,debug=True) 
 
