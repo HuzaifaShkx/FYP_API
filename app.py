@@ -250,6 +250,47 @@ def get_eeg_bands():
     # Return the data as a JSON response
     return jsonify(filtered_data)
 
+@app.route('/eeg_bands_file/<string:filepath>', methods=['GET'])
+def get_eeg_bands_file(filepath):
+    try:
+        data = pd.read_csv(f"C:/FYP_Code/FYPAPIs/Uploads/eeg/{filepath}")
+        # data = pd.read_csv(f"{filepath}")
+        # Define frequency bands
+        sampling_rate = 256  # Adjust based on the data sampling rate (samples per second)
+
+
+        # Apply filters for each band on the channels
+        channels = ['TP9', 'AF7', 'AF8', 'TP10']
+        bands = ['Delta', 'Theta', 'Alpha', 'Beta']
+        filtered_data = {}
+
+        for channel in channels:
+            filtered_data[channel] = {}
+            for band in bands:
+                if band == 'Delta':
+                    lowcut, highcut = 0.5, 4
+                elif band == 'Theta':
+                    lowcut, highcut = 4, 8
+                elif band == 'Alpha':
+                    lowcut, highcut = 8, 12
+                elif band == 'Beta':
+                    lowcut, highcut = 12, 30
+
+                filtered_data[channel][band] = bandpass_filter(data[channel], lowcut, highcut, sampling_rate)
+
+
+        for channel in filtered_data:
+            for band in filtered_data[channel]:
+                if isinstance(filtered_data[channel][band], np.ndarray):
+                    filtered_data[channel][band] = filtered_data[channel][band].tolist()
+
+        # Prepare the response with filtered data
+    
+        # Return the data as a JSON response
+        return jsonify(filtered_data),200
+    except Exception:
+        return 500
+
 @app.route('/DoctorSignup', methods=['POST'])
 def add_doctor():
     try:
@@ -511,7 +552,7 @@ def getPatient(patient_id):
             "height": patient[4],
             "weight": patient[5],
             "contact":patient[6],
-            "imgPath":patient[7]
+            "imgpath":patient[7]
             }
             cursor.close()
 
@@ -538,7 +579,7 @@ def getPatientByEmail(patient_email):
             "height": patient[4],
             "weight": patient[5],
             "contact":patient[6],
-            "imgPath":patient[7]
+            "imgpath":patient[7]
             }
             cursor.close()
 
@@ -667,7 +708,7 @@ def getRegisteredPatient(doctor_id):
                 "height": i[4],
                 "weight": i[5],
                 "contact":i[6],
-                "imgPath":i[7]
+                "imgpath":i[7]
                 }
                 patientlist.append(patient)
             cursor.close()
@@ -751,7 +792,7 @@ def getNewPatientAppointmentDate(doctor_id, patient_id):
     
     try:
         cursor=conn.cursor()
-        cursor.execute("SELECT a.dates,a.times FROM Patient p JOIN [User] u ON p.UserId = u.Id JOIN Appointment a ON p.Id = a.patient_id WHERE a.doctor_id = ? and a.patient_id=? and a.appStatus='false';",doctor_id,patient_id)
+        cursor.execute("SELECT a.dates,a.times FROM Patient p JOIN [User] u ON p.UserId = u.Id JOIN Appointment a ON p.Id = a.patient_id WHERE a.doctor_id = ? and a.patient_id=? and a.appStatus='false' ORDER BY a.dates DESC;",doctor_id,patient_id)
         p=cursor.fetchall()[0]
         if p:
             patient = {
@@ -1220,11 +1261,20 @@ def addExperiment():
 def getSession(doctorid, patientid):
     try:
         cursor = conn.cursor()
-        cursor.execute('select s.id from Appointment a join Session s on a.AppId=s.appointmentId where a.doctor_id=? and a.patient_id=?',(doctorid,patientid))
+        cursor.execute('select s.id,a.AppId from Appointment a join Session s on a.AppId=s.appointmentId where a.doctor_id=? and a.patient_id=?',(doctorid,patientid))
         result = cursor.fetchall()
-        session_ids = [row[0] for row in result]
+        sessions = []
+
+        for row in result:
+            s = {
+                'sessionid': row[0],
+                'appid': row[1],
+                
+            }
+            sessions.append(s)
+        
         cursor.close()
-        return jsonify({"status": "Sessions found", "sessions": session_ids}),200
+        return jsonify(sessions),200
     except Exception as e:
         return jsonify({'status':"Sessions not found"}),500
     
@@ -1248,6 +1298,28 @@ def getExperiments(sessionid):
         return jsonify(experiments),200 
     except Exception as e:
         return jsonify({'status':"Experiments not found"}),500
+    
+@app.route("/GetSessionsForPatient/<int:patientid>", methods=['GET'])
+def getSessionForPatient( patientid):
+    try:
+        cursor = conn.cursor()
+        cursor.execute('select a.AppId,a.doctor_id,s.id as [SessionId],s.supervisorId from Appointment a join Session s on a.AppId=s.appointmentId where a.patient_id=?',(patientid))
+        result = cursor.fetchall()
+        sessions = []
+
+        for row in result:
+            ex = {
+                'appid': row[0],
+                'doctorid': row[1],
+                'sessionid': row[2],
+                'supervisorid': row[3]
+            }
+        sessions.append(ex)
+        cursor.close()
+        return jsonify(sessions),200 
+    except Exception as e:
+        return jsonify({'status':"Sessions not found"}),500
+    
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000,debug=True) 
 
