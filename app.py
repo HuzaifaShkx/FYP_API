@@ -1,4 +1,5 @@
 import os
+import cv2
 import numpy as np
 import pickle
 import torch
@@ -14,6 +15,12 @@ import pandas as pd
 import numpy as np
 from scipy.signal import butter, filtfilt
 from tensorflow.keras.models import load_model
+import torch
+from ultralytics import YOLO
+from fer import FER
+from collections import Counter
+
+
 
 
 app=Flask(__name__)
@@ -28,6 +35,96 @@ UPLOAD_FOLDER_watchedVideo = 'FYPAPIs/Uploads/watchedvideos/'
 
 conn = pyodbc.connect('DRIVER={SQL Server};SERVER=DESKTOP-8BL3MIG;DATABASE=EEG_FYP;Trusted_Connection=yes;')
 #cursor=conn.cursor()
+# Load YOLOv8 model for face detection
+yolo_model = YOLO("FYPAPIs\yolov8n-face.pt")  # Make sure this file exists in your project
+
+# Load FER for emotion recognition
+emotion_detector = FER(mtcnn=True)
+
+# Function to detect face using YOLOv8 and classify emotions (No Bounding Box)
+def detect_emotion_from_frame(frame):
+    results = yolo_model(frame)  # Run YOLO face detection
+    emotion_labels = []  # Store detected emotions for this frame
+
+    h, w, _ = frame.shape  # Get frame dimensions
+
+    for result in results:
+        for box in result.boxes:
+            x1, y1, x2, y2 = map(int, box.xyxy[0])  # Get face bounding box
+            confidence = float(box.conf[0])  # Confidence score
+
+            # 🔹 Adjust confidence threshold (detects smaller & lower faces)
+            if confidence > 0.3:  
+                # 🔹 Ensure bounding box is inside image bounds
+                x1, y1 = max(0, x1), max(0, y1)
+                x2, y2 = min(w, x2), min(h, y2)
+
+                face_roi = frame[y1:y2, x1:x2]  # Crop the detected face
+
+                if face_roi.size == 0:  # 🔹 Avoid processing empty crops
+                    continue  
+
+                # Perform emotion detection on the cropped face
+                emotion_results = emotion_detector.detect_emotions(face_roi)
+
+                if emotion_results:
+                    emotions = emotion_results[0]["emotions"]
+                    
+                    # Only keep Happy, Sad, and Neutral (Relax)
+                    happy = emotions.get("happy", 0)
+                    sad = emotions.get("sad", 0)
+                    neutral = emotions.get("neutral", 0)  # Using neutral as "Relax"
+
+                    # Determine dominant emotion
+                    if happy > max(sad, neutral):
+                        emotion_label = "Happy"
+                    elif sad > max(happy, neutral):
+                        emotion_label = "Sad"
+                    else:
+                        emotion_label = "Relax"
+
+                    emotion_labels.append(emotion_label)
+    
+    return emotion_labels
+def predict_eeg_fuse(model, csv_file, lowcut=1.0, highcut=50.0, sampling_rate=256, chunk_size=1536):
+    """
+    Predict the class for a full EEG CSV file using the trained model.
+
+    Parameters:
+    - model: Trained EEGNet model.
+    - csv_file: Path to the EEG CSV file.
+    - lowcut, highcut: Band-pass filter cutoff frequencies.
+    - sampling_rate: EEG sampling rate in Hz.
+    - chunk_size: Number of samples per chunk.
+
+    Returns:
+    - predictions: Array of predicted class probabilities for each chunk.
+    - predicted_classes: Array of predicted class labels for each chunk.
+    """
+    # Load the EEG data
+    data = pd.read_csv(csv_file)
+    columns_to_drop = ['timestamps']  # Drop unnecessary columns if present
+    data = data.drop(columns=columns_to_drop, errors='ignore')
+    eeg_array = data.to_numpy()
+
+    # Apply band-pass filter
+    eeg_filtered = bandpass_filter(eeg_array, lowcut, highcut, sampling_rate)
+
+    # Chunk the filtered data
+    num_chunks = len(eeg_filtered) // chunk_size
+    if num_chunks == 0:
+        raise ValueError("EEG data is too short for the specified chunk size.")
+
+    eeg_chunks = eeg_filtered[:num_chunks * chunk_size].reshape(num_chunks, chunk_size, eeg_array.shape[1])
+    eeg_chunks = np.transpose(eeg_chunks, (0, 2, 1))  # Shape: (num_chunks, channels, samples)
+    eeg_chunks = eeg_chunks[..., np.newaxis]  # Add extra dimension for model input: (num_chunks, channels, samples, 1)
+
+    # Predict using the model
+    predictions = model.predict(eeg_chunks)  # Shape: (num_chunks, num_classes)
+    predicted_classes = np.argmax(predictions, axis=1)  # Get the class labels (0, 1, 2)
+
+    return predictions, predicted_classes
+
 def load_single_trial(file_path, trial_index):
     with open(file_path, 'rb') as file:
         data = pickle.load(file, encoding='latin1')
@@ -950,6 +1047,29 @@ def addCaptureVideo():
     except Exception as e:
         return jsonify({"Exception":str(e)}),500
     
+@app.route('/uploadFusionPrediction',methods=['POST'])
+def uploadFusionPrediction():
+    eegfile = request.files['eeg']
+    videofile = request.files['file']
+    sessionid=request.form.get('sessionid')
+    if not eegfile and not videofile:
+        return jsonify({"status":"No eeg or video File selected"}),404
+    elif eegfile and allowed_file_eeg(eegfile.filename):    
+        eegfilepath = os.path.join(UPLOAD_FOLDER_EEG, f"{eegfile.filename}")
+        eegfile.save(eegfilepath)
+        videofilepath = os.path.join(UPLOAD_FOLDER_recorded, f"{videofile.filename}")
+        videofile.save(videofilepath)
+    cursor=conn.cursor()
+    cursor.execute('insert into ExperimentFusion(EEGPath,VideoPath,sessionId) OUTPUT INSERTED.id values(?,?,?)',(eegfilepath,videofilepath,sessionid))
+    result = cursor.fetchone()
+    inserted_id = result[0] if result else None
+
+    conn.commit()
+    cursor.close()    
+    return jsonify({"status":"Fusion Prediction files Uploaded",'id':inserted_id}),200
+
+
+
 @app.route('/addWatchedVideo',methods=['POST'])
 def addWatchedVideo():
     try:
@@ -1314,12 +1434,85 @@ def getSessionForPatient( patientid):
                 'sessionid': row[2],
                 'supervisorid': row[3]
             }
-        sessions.append(ex)
+            sessions.append(ex)
         cursor.close()
         return jsonify(sessions),200 
     except Exception as e:
         return jsonify({'status':"Sessions not found"}),500
     
+
+@app.route('/emotionfromframe')    
+def EmotionFromFrame():
+    emotions1=[]
+    # Load the video
+    video_path = r'E:/DataSet Emotions Only/S49/Videos/S49-Happy.mp4'  # Update with your correct video path
+    cap = cv2.VideoCapture(video_path)
+
+    fps = int(cap.get(cv2.CAP_PROP_FPS))
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    video_duration = total_frames // fps  # Total video duration in seconds
+
+    # Extract frames at 6-second intervals (10 chunks in the video)
+    num_frames = 10  # Total frames we want
+    frame_times = [i * (video_duration // num_frames) for i in range(num_frames)]  # Select evenly spaced frames
+    frame_indices = [t * fps for t in frame_times]  # Convert seconds to frame indices
+
+    all_emotions = []  # Store all detected emotions
+
+    for i in frame_indices:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, i)  # Jump to the frame at the given second
+        ret, frame = cap.read()
+
+        if ret:
+            # Detect emotion in the current frame
+            emotion_labels = detect_emotion_from_frame(frame)
+            all_emotions.append((i // fps, emotion_labels))  # Store frame time & detected emotions
+
+    cap.release()
+    cv2.destroyAllWindows()
+
+    # Print detected emotions at the end
+    print("\n🔹 Detected Emotions for Selected Frames:")
+    for frame_time, emotions in all_emotions:
+        if emotions:  # Store detected emotions in list
+            emotions1.append(emotions[0])
+        print(f"At {frame_time} seconds: {', '.join(emotions) if emotions else 'No face detected'}")
+
+    print("\n📌 All Detected Emotions:", emotions1)
+    # return jsonify(emotions1),200
+    #  Load the trained model
+    model_path = r"C:\FYP_Code\Serious_Work\E\Trained_Model/Model9_dropout-256.h5"  # Update with your model path
+    model = load_model(model_path)
+
+    # File path to the new EEG CSV file
+    vn="S9-Relax"
+    eeg_file = f"E:/DataSet Emotions Only/S49/EEG/S49-Happy.csv" # Update with your EEG file path
+
+    # Map emotions to labels
+    label_map = {"Happy": 0, "Sad": 1, "Relax": 2, "Stress 1":3,"Stress 2":4,"Stress 3":5}  # Map "Relax" to Neutral
+
+    # Make predictions
+
+    predictions, predicted_classes = predict_eeg_fuse(model, eeg_file)
+
+        # Map predicted classes to emotion labels
+    mapped_emotions = [list(label_map.keys())[list(label_map.values()).index(cls)] for cls in predicted_classes]
+
+        # Display the results
+    print("Predictions (class probabilities):")
+    print(predictions)
+    print("\nPredicted Classes:")
+    print(predicted_classes)
+    print("\nMapped Emotions:")
+    print(mapped_emotions)
+    # Perform Late Fusion using Majority Voting
+    fused_emotions = []
+    for eeg, video in zip(mapped_emotions, emotions1):
+        combined = [eeg, video]  # Combine predictions from both modalities
+        fused_emotion = Counter(combined).most_common(1)[0][0]  # Get most common emotion
+        fused_emotions.append(fused_emotion)
+    return jsonify(fused_emotions),200
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000,debug=True) 
 
